@@ -46,6 +46,8 @@ def create_channel_input_vector(message_bits):
 
     """
     Takes in message bits and returns the channel input vector (u), frozen bit prior vector (Akc)
+
+    u is the vector consisting of message bits in positions with high reliability. Rest are frozen bits.
     """
 
     str_message_bits = str(message_bits)
@@ -56,9 +58,7 @@ def create_channel_input_vector(message_bits):
     frozen_bits_prior_vector =[0] * N
     
    
-    if not re.fullmatch('[01]+', str_message_bits):
-       print("Error! Message bits need to be binary")
-       return
+    assert(re.fullmatch('[01]+', str_message_bits))
     
     
     with open("reliability_sequences.json", 'r+') as f:
@@ -84,7 +84,7 @@ def create_channel_input_vector(message_bits):
        frozen_bits_prior_vector[i]=-1
        
        
-    return channel_input_vector, frozen_bits_prior_vector
+    return channel_input_vector, frozen_bits_prior_vector, N
 
 
 def polar_encode(N: int, channel_input_vector:list):
@@ -103,17 +103,94 @@ def polar_encode(N: int, channel_input_vector:list):
             for k in range(step):
                 x[j+k] ^= int(x[j+k+step])  # XOR operation
 
-   return x
+   return np.array(x).astype(int)
 
 
-      
+def modulation_bpsk(polar_coded_msg: np.ndarray):
+    """
+    polar_coded_msg: numpy array of 0/1 bits
+    returns: numpy array of BPSK symbols (+1/-1)
+    """
+    return 1 - 2 * polar_coded_msg
+
+
+
+def one_hot(msg_bit_sequence: int):
+
+   """
+   Encodes the message bit sequence into a one hot encoded format.
+   """
+
+   str_seq = str(msg_bit_sequence)
+   assert re.fullmatch('[01]+', str_seq), "Sequence must contain only 0 or 1"
+
+   seq_array = np.array([int(b) for b in str_seq], dtype=int)
+   one_hot = np.zeros((len(seq_array), 2), dtype=int)
+   one_hot[np.arange(len(seq_array)), seq_array] = 1
+   return one_hot
+   
+
+
+def one_hot_smoothing(msg_bit_sequence: int, num_classes=2, smoothing_factor=0.1):
+
+   """
+   Converts the given binary sequence into a list of one hot smoothed vectors.
+   """
+
+   one_hot_encoded = one_hot(msg_bit_sequence)
+   smoothed = (1 - smoothing_factor) * one_hot_encoded + (smoothing_factor / 2)
+   return np.round(smoothed, 3)
+
+
+def awgn_channel(modulated_sequence:list, SNRs_db:list, message_bit_size:int, block_length:int):
+
+   """
+   Takes in a modulated sequence and list of SNR values in db (both 1D).
+
+   Returns a list of lists of the AWGN channel outputs on the various SNR values defined in SNRs_db list
+   """
+
+   code_rate = float(message_bit_size)/float(block_length)
+
+   SNRs_linear = 10**(SNRs_db/10)
+
+   variances = np.sqrt(1/(2*code_rate*SNRs_linear))
+
+
+   noises = []
+
+   for variance in variances:
+      noise = np.random.normal(0, variance, size=( block_length))
+     # print(noise)
+      noises.append(noise)
+   
+   noises_np = np.array(noises)
+   print(noises_np.shape)
+
+   result = noises_np + modulated_sequence
+
+   return result
+
+
+
+
+def generate_data(message_bit_size, block_length, num_samples):
+   pass
+         
+
+
 
 if __name__=="__main__":
 
-  civ, frozen_sets = create_channel_input_vector(message_bits=110101010101110111)
-  print(frozen_sets)
-  print(f"\n {civ}")
+  civ, frozen_sets, N = create_channel_input_vector(message_bits=110101010101110111)
+  
+  modulated = modulation_bpsk(polar_coded_msg=polar_encode(N, civ))
 
-  print(polar_encode(32, civ))
+  print(f"Modulated sequence: {modulated}\n")
+
+  channel_outputs = awgn_channel(modulated_sequence=modulated, SNRs_db=np.array([4, 8]), message_bit_size=18, block_length=N)
+
+  
+
   
 
