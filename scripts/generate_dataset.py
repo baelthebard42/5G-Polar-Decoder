@@ -1,5 +1,6 @@
 import re, json
 import numpy as np
+import pandas as pd
 
 N_MAX = 1024
 K_START = 12
@@ -50,22 +51,20 @@ def create_channel_input_vector(message_bits):
     u is the vector consisting of message bits in positions with high reliability. Rest are frozen bits.
     """
 
-    str_message_bits = str(message_bits)
-
-    N= find_N(len(str_message_bits))
+    N= find_N(len(message_bits))
 
     channel_input_vector =[0] * N
     frozen_bits_prior_vector =[0] * N
     
    
-    assert(re.fullmatch('[01]+', str_message_bits))
+    assert(re.fullmatch('[01]+', ''.join(str(i) for i in message_bits)))
     
     
     with open("reliability_sequences.json", 'r+') as f:
        data = json.load(f)
        
        reliability_seq = data[str(N)]
-       frozen_sets =  reliability_seq[len(str_message_bits):]
+       frozen_sets =  reliability_seq[len(message_bits):]
 
        if len(reliability_seq)==0: # reliability sequence for that N is not yet computed
           
@@ -77,8 +76,8 @@ def create_channel_input_vector(message_bits):
          f.truncate()
          f.close()
     
-    for i in range(len(str_message_bits)):
-       channel_input_vector[reliability_seq[i]] = int(str(message_bits)[i])
+    for i in range(len(message_bits)):
+       channel_input_vector[reliability_seq[i]] = message_bits[i]
     
     for i in frozen_sets:
        frozen_bits_prior_vector[i]=-1
@@ -121,10 +120,10 @@ def one_hot(msg_bit_sequence: int):
    Encodes the message bit sequence into a one hot encoded format.
    """
 
-   str_seq = str(msg_bit_sequence)
-   assert re.fullmatch('[01]+', str_seq), "Sequence must contain only 0 or 1"
+   
+   assert re.fullmatch('[01]+', ''.join(str(i) for i in msg_bit_sequence)), "Sequence must contain only 0 or 1"
 
-   seq_array = np.array([int(b) for b in str_seq], dtype=int)
+   seq_array = np.array([b for b in msg_bit_sequence], dtype=int)
    one_hot = np.zeros((len(seq_array), 2), dtype=int)
    one_hot[np.arange(len(seq_array)), seq_array] = 1
    return one_hot
@@ -150,6 +149,8 @@ def awgn_channel(modulated_sequence:list, SNRs_db:list, message_bit_size:int, bl
    Returns a list of lists of the AWGN channel outputs on the various SNR values defined in SNRs_db list
    """
 
+   SNRs_db = np.array(SNRs_db)
+
    code_rate = float(message_bit_size)/float(block_length)
 
    SNRs_linear = 10**(SNRs_db/10)
@@ -165,7 +166,7 @@ def awgn_channel(modulated_sequence:list, SNRs_db:list, message_bit_size:int, bl
       noises.append(noise)
    
    noises_np = np.array(noises)
-   print(noises_np.shape)
+ #  print(noises_np.shape)
 
    result = noises_np + modulated_sequence
 
@@ -174,21 +175,66 @@ def awgn_channel(modulated_sequence:list, SNRs_db:list, message_bit_size:int, bl
 
 
 
-def generate_data(message_bit_size, block_length, num_samples):
-   pass
-         
+def generate_data(message_bit_size, SNRs_db, smoothing_factor ):
+
+   """
+   Generates a single data instance for given message bit size.
+
+   """
+
+   msg_sequence = np.random.randint(0, 2, size=message_bit_size)
+   target = one_hot_smoothing(msg_sequence, smoothing_factor=smoothing_factor)
+
+   civ, frozen_bit_prior, N = create_channel_input_vector(message_bits=msg_sequence)
+   polar_coded_form = polar_encode(N, civ)
+   modulated_signal = modulation_bpsk(polar_coded_msg=polar_coded_form)
+
+   channel_observation_vector = awgn_channel(modulated_sequence=modulated_signal, SNRs_db=SNRs_db, message_bit_size=message_bit_size, block_length=N)
+
+   return channel_observation_vector, frozen_bit_prior, target, msg_sequence
+
+
+
+def generate_dataset(message_bit_size, SNRs_db, smoothing_factor, num_samples):
+
+   """
+   Generates a complete dataset(dataframe) of size num_samples for a Polar Code Decoder
+
+   Features:  Channel Observation Vector (varying SNRs as specified by SNRs_db), Frozen bit prior vector, 
+   Target: Message bits (1 hot smoothed)
+   Extras: Original message sequence
+   """
+
+   columns = [f'channel_ob_vector_snr_{i}' for i in SNRs_db] + ['frozen_bit_prior', 'original_msg', 'target']
+
+   dataset = []
+
+   for i in range(num_samples):
+
+      print(f"Generating {i}th sample...\n")
+
+      channel_observation_vector, frozen_bit_prior, target, msg_sequence = generate_data(message_bit_size, SNRs_db, smoothing_factor)
+      instance = [channel_observation_vector[i] for i in range(len(SNRs_db))] + [frozen_bit_prior, msg_sequence, target]
+      dataset.append(instance)
+   
+   print("Generation completed!")
+   
+   return pd.DataFrame(dataset, columns=columns)
+
+
 
 
 
 if __name__=="__main__":
 
-  civ, frozen_sets, N = create_channel_input_vector(message_bits=110101010101110111)
+   dataframe = generate_dataset(message_bit_size=8, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=256000)
+   dataframe.to_csv("data_32bits_polar.csv")
+
+
   
-  modulated = modulation_bpsk(polar_coded_msg=polar_encode(N, civ))
 
-  print(f"Modulated sequence: {modulated}\n")
 
-  channel_outputs = awgn_channel(modulated_sequence=modulated, SNRs_db=np.array([4, 8]), message_bit_size=18, block_length=N)
+  
 
   
 
