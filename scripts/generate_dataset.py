@@ -227,8 +227,14 @@ def generate_dataset(message_bit_size, SNRs_db, smoothing_factor, num_samples):
 
 if __name__=="__main__":
 
-   dataframe = generate_dataset(message_bit_size=8, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=256000)
-   dataframe.to_csv("data_32bits_polar.csv")
+    dataframe = generate_dataset(message_bit_size=8, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=256000)
+    dataframe.to_csv("data_32bits_polar.csv")
+    
+    dataframe_2 = generate_dataset(message_bit_size=16, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=372000)
+    dataframe_2.to_csv('data_32bits_polar.csv', mode='a', index=False, header=False)
+
+    dataframe_3 = generate_dataset(message_bit_size=24, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=372000)
+    dataframe_3.to_csv('data_32bits_polar.csv', mode='a', index=False, header=False)
 
 
   
