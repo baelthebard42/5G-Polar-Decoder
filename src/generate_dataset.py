@@ -54,7 +54,7 @@ def create_channel_input_vector(message_bits):
     N= find_N(len(message_bits))
 
     channel_input_vector =[0] * N
-    frozen_bits_prior_vector =[0] * N
+    frozen_bits_prior_vector =[1] * N
     
    
     assert(re.fullmatch('[01]+', ''.join(str(i) for i in message_bits)))
@@ -80,7 +80,7 @@ def create_channel_input_vector(message_bits):
        channel_input_vector[reliability_seq[i]] = message_bits[i]
     
     for i in frozen_sets:
-       frozen_bits_prior_vector[i]=1
+       frozen_bits_prior_vector[i]=0
        
        
     return channel_input_vector, frozen_bits_prior_vector, N
