@@ -38,14 +38,18 @@ class MambaPolarDecoder(nn.Module):
         self.d_conv = d_conv
         self.expand = expand
         self.dropout = dropout
-        self.residual_scale = residual_scale
+        self.residual_scale = nn.Parameter(torch.tensor(1.0))
         
 
         self.discrete_embedding = nn.Embedding(2, self.d_model) # for frozen 
         self.linear_embedding1 = nn.Linear(in_features=1, out_features=d_model )
      #   self.linear_embedding2 = nn.Linear(in_features=1, out_features=d_model)
 
-        self.linear_input_layer = nn.Linear(2*self.d_model, d_model)
+        self.input_layer = nn.Sequential(
+    nn.Linear(2*self.d_model, self.d_model),
+    nn.GELU(),
+    nn.Linear(self.d_model, self.d_model)
+)
 
         self.alpha = nn.Parameter(torch.tensor(1.0))   # for channel
         self.beta = nn.Parameter(torch.tensor(1.0))    # for SNR
@@ -101,10 +105,7 @@ class MambaPolarDecoder(nn.Module):
             nn.init.zeros_(self.layer_norm.bias)
 
        
-        #with torch.no_grad():
-        #    self.alpha.fill_(1.0)     # observation — usually strong
-        #    self.beta.fill_(0.05)     # SNR — starting small so it doesn't dominate
-        #    self.gamma.fill_(0.5)     # prior — small but present
+      
         
 
     
@@ -131,7 +132,8 @@ class MambaPolarDecoder(nn.Module):
 
       #  print("check 1")
         encoder_input = torch.cat([ch_emb, froz_emb], dim=-1)
-        encoder_input = self.linear_input_layer(encoder_input)
+        encoder_input = self.input_layer(encoder_input)
+
 
         
      #   residuals = []
@@ -140,7 +142,7 @@ class MambaPolarDecoder(nn.Module):
             x_new = layer(x)
         #    residuals.append(x_new)
             x = x_new*self.residual_scale + x
-            x = self.post_norms[idx](x)
+      #      x = self.post_norms[idx](x)
         
         #if len(residuals) > 1:
       #   x = sum(residuals) / len(residuals)
