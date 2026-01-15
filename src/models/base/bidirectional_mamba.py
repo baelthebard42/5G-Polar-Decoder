@@ -16,7 +16,7 @@ class BiMambaBlock(nn.Module):
         d_state: int = 16,
         d_conv: int = 4,
         expand: int = 2,
-        dropout: float = 0.1,
+        dropout: float = 0.05,
         residual_scale: float = 1.0,
         share_norm: bool = False,
         share_ffn: bool = False,
@@ -56,7 +56,8 @@ class BiMambaBlock(nn.Module):
             )
 
         self.dropout = nn.Dropout(dropout)
-        self.residual_scale = residual_scale
+      #  self.residual_scale = residual_scale
+        self.residual_scale = nn.Parameter(torch.tensor(1.0))
 
     def forward_branch(self, x, pre_ln, mamba, post_ln, ffn, flip_time=False):
         """
@@ -83,7 +84,7 @@ class BiMambaBlock(nn.Module):
         y = ffn(h)
         y = self.dropout(y)
         y = h + self.residual_scale * y
-        y = post_ln(y)  # apply post norm again (keeps pattern similar to transformer block)
+    #    y = post_ln(y)  # apply post norm again (keeps pattern similar to transformer block)
         return y
 
     def forward(self, x):
@@ -175,4 +176,4 @@ class BiMambaEncoder(nn.Module):
         for layer in self.layers:
             h = layer(h)
 
-        return self.norm(h)
+        return h

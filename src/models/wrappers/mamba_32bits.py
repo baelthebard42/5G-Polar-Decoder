@@ -38,7 +38,8 @@ class MambaPolarDecoder(nn.Module):
         self.d_conv = d_conv
         self.expand = expand
         self.dropout = dropout
-        self.residual_scale = nn.Parameter(torch.tensor(1.0))
+      #  self.residual_scale = nn.Parameter(torch.tensor(1.0))
+      #  self.residual_scale = 1.0
         
 
         self.discrete_embedding = nn.Embedding(2, self.d_model) # for frozen 
@@ -46,14 +47,17 @@ class MambaPolarDecoder(nn.Module):
      #   self.linear_embedding2 = nn.Linear(in_features=1, out_features=d_model)
 
         self.input_layer = nn.Sequential(
-    nn.Linear(2*self.d_model, self.d_model),
+    nn.Linear(2*self.d_model, 2*self.d_model),
     nn.GELU(),
-    nn.Linear(self.d_model, self.d_model)
+      nn.Dropout(dropout),
+    nn.Linear(2*self.d_model, self.d_model)
 )
 
-        self.alpha = nn.Parameter(torch.tensor(1.0))   # for channel
-        self.beta = nn.Parameter(torch.tensor(1.0))    # for SNR
-        self.gamma = nn.Parameter(torch.tensor(1.0))   # for frozen
+       # self.linear_input_layer = nn.Linear(2*self.d_model, self.d_model)
+
+      #  self.alpha = nn.Parameter(torch.tensor(1.0))   # for channel
+       # self.beta = nn.Parameter(torch.tensor(1.0))    # for SNR
+       # self.gamma = nn.Parameter(torch.tensor(1.0))   # for frozen
 
         self.encoder_layers = nn.ModuleList([
             BiMambaEncoder(
@@ -64,46 +68,43 @@ class MambaPolarDecoder(nn.Module):
                 d_conv=self.d_conv,
                 expand=self.expand,
                 dropout=self.dropout,
+              
             
               
 
             ) for _ in range(self.num_layer_encoder)
         ])
 
+        self.skip_weights = nn.Parameter(torch.ones(num_layer_encoder + 1) / (num_layer_encoder + 1))
+
         self.layer_norm = nn.LayerNorm(d_model)
-        self.post_norms = nn.ModuleList([
-    nn.LayerNorm(self.d_model) for _ in range(self.num_layer_encoder)
-])
-        self.final_proj_layer = nn.Linear(d_model, 1)
+    #    self.post_norms = nn.ModuleList([
+  #  nn.LayerNorm(self.d_model) for _ in range(self.num_layer_encoder)
+#])
+       # self.final_proj_layer = nn.Linear(d_model, 1)
+
+        self.output_head = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.GELU(),
+            nn.Dropout(dropout / 2),
+            nn.Linear(d_model // 2, 1)
+        )
 
         self.init_weights_new()
 
     
     def init_weights_new(self):
-      
         nn.init.xavier_uniform_(self.linear_embedding1.weight)
-        if self.linear_embedding1.bias is not None:
-            nn.init.zeros_(self.linear_embedding1.bias)
-
-       
-      #  nn.init.xavier_uniform_(self.linear_embedding2.weight)
-     #   if self.linear_embedding2.bias is not None:
-     #       nn.init.zeros_(self.linear_embedding2.bias)
-
-       
-        nn.init.normal_(self.discrete_embedding.weight, mean=0.0, std=1e-2)
-
-     
-        nn.init.xavier_uniform_(self.final_proj_layer.weight)
-        if self.final_proj_layer.bias is not None:
-            nn.init.zeros_(self.final_proj_layer.bias)
-
-       
-        if hasattr(self.layer_norm, 'weight'):
-            nn.init.ones_(self.layer_norm.weight)
-        if hasattr(self.layer_norm, 'bias'):
-            nn.init.zeros_(self.layer_norm.bias)
-
+        nn.init.zeros_(self.linear_embedding1.bias)
+        nn.init.normal_(self.discrete_embedding.weight, std=0.02)
+        
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+      
+        
        
       
         
@@ -132,22 +133,28 @@ class MambaPolarDecoder(nn.Module):
 
       #  print("check 1")
         encoder_input = torch.cat([ch_emb, froz_emb], dim=-1)
+      #  encoder_input = self.linear_input_layer(encoder_input)
         encoder_input = self.input_layer(encoder_input)
 
 
         
-     #   residuals = []
+     
+        
         x = encoder_input
+        layer_outputs = [x]
         for idx, layer in enumerate(self.encoder_layers):
             x_new = layer(x)
+            layer_outputs.append(x_new)
         #    residuals.append(x_new)
-            x = x_new*self.residual_scale + x
-      #      x = self.post_norms[idx](x)
+          #  x = x_new*self.residual_scale + x
+          #  x = self.post_norms[idx](x)
         
-        #if len(residuals) > 1:
-      #   x = sum(residuals) / len(residuals)
+        weights = torch.softmax(self.skip_weights, dim=0)
+        x = sum(w * out for w, out in zip(weights, layer_outputs))
+        x = self.layer_norm(x)
+        logits = self.output_head(x).squeeze(-1)
        
-        return self.final_proj_layer(x).squeeze(-1)
+        return logits
     
 
 

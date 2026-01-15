@@ -4,9 +4,6 @@ import pandas as pd
 
 N_MAX = 1024
 K_START = 12
-
-
-
 def get_reliability_seq(N: int, master_reliability_sequence: list):
    
    
@@ -193,6 +190,7 @@ def generate_data(message_bit_size, SNRs_db):
    modulated_signal = modulation_bpsk(polar_coded_msg=polar_coded_form)
 
    channel_observation_vector = awgn_channel(modulated_sequence=modulated_signal, SNRs_db=SNRs_db, message_bit_size=message_bit_size, block_length=N)
+   #target = one_hot_smoothing(civ)
    target = civ
 
   # print(f"Shape of channel observation vector: {channel_observation_vector.shape}")
@@ -211,7 +209,6 @@ def generate_dataset(message_bit_size, SNRs_db, smoothing_factor, num_samples):
    Target: Message bits (1 hot smoothed)
    Extras: Original message sequence
    """
-
    columns = [f'channel_ob_vector_snr_{i}' for i in SNRs_db] + ['frozen_bit_prior', 'original_msg', 'target']
 
    dataset = []
@@ -234,14 +231,8 @@ def generate_dataset(message_bit_size, SNRs_db, smoothing_factor, num_samples):
 
 if __name__=="__main__":
 
-    dataframe = generate_dataset(message_bit_size=8, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=256000)
-    dataframe.to_csv("data_32bits_polar.csv")
-    
-    dataframe_2 = generate_dataset(message_bit_size=16, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=372000)
-    dataframe_2.to_csv('data_32bits_polar.csv', mode='a', index=False, header=False)
-
-    dataframe_3 = generate_dataset(message_bit_size=24, SNRs_db=[4, 4.5, 5, 5.5, 6], smoothing_factor=0.1, num_samples=372000)
-    dataframe_3.to_csv('data_32bits_polar.csv', mode='a', index=False, header=False)
+  _, _, target = (generate_data(message_bit_size=8, SNRs_db=[4]))
+  print(target.shape)
 
 
   
