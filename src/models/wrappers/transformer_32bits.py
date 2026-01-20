@@ -67,14 +67,14 @@ class CodeAwareMask:
         # - ONLY frozen bit positions (known priors)
         # - NOT other message bit positions (avoid circular dependency)
         
-        for msg_idx in self.message_indices:
-            # Channel observations (cols 0:N) - already allowed (False)
-            # No action needed - message bits can see all channel obs
+        # for msg_idx in self.message_indices:
+        #     # Channel observations (cols 0:N) - already allowed (False)
+        #     # No action needed - message bits can see all channel obs
             
-            # In frozen embedding space (cols N:2N):
-            # Block attention to OTHER MESSAGE positions
-            for other_msg_idx in self.message_indices:
-                mask[msg_idx, N + other_msg_idx] = True
+        #     # In frozen embedding space (cols N:2N):
+        #     # Block attention to OTHER MESSAGE positions
+        #     for other_msg_idx in self.message_indices:
+        #         mask[msg_idx, N + other_msg_idx] = True
             
             # Frozen positions remain allowed (already False)
             # Message bits CAN attend to frozen bit embeddings
@@ -328,9 +328,9 @@ def plot_mask_pattern(frozen_prior):
     print("Saved visualization to 'code_aware_mask.png'")
 
 
-# plot_mask_pattern(torch.tensor([
-#     1, 0, 1, 1, 0, 1, 1, 0,
-#     0, 1, 1, 0, 1, 0, 0, 1,
-#     1, 1, 0, 0, 1, 0, 1, 0,
-#     0, 0, 1, 1, 1, 1, 0, 1
-# ]).unsqueeze(0))
+plot_mask_pattern(torch.tensor([
+    1, 0, 1, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 1, 0, 0, 1,
+    1, 1, 0, 0, 1, 0, 1, 0,
+    0, 0, 1, 1, 1, 1, 0, 1
+]).unsqueeze(0))
