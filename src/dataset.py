@@ -134,5 +134,5 @@ class PolarDecDataset(Dataset):
         #     "yin": yin                         # EXACT paper input
         # }
         
-        self.H.to(device=self.device)
+      #  self.H.to(device=self.device)
         return yin, y, target_tensor, syndrome
