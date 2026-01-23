@@ -241,6 +241,7 @@ class TransformerPolarDecoder_v2(nn.Module):
         num_layers: int = 4,
         seq_len: int = 32,
         dim_feedforward: int = 256,
+            use_mask=False,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -249,6 +250,7 @@ class TransformerPolarDecoder_v2(nn.Module):
         self.d_model = d_model
         self.nhead = nhead
         self.num_layers = num_layers
+        self.use_mask = use_mask
 
         # Input embeddings
         self.channel_embedding = nn.Linear(1, d_model)
@@ -544,12 +546,12 @@ def plot_code_aware_mask(frozen_prior):
     print("Saved visualization to 'code_aware_mask.png'")
 
 
-frozen_prior = torch.tensor([
-    1, 0, 1, 1, 0, 1, 1, 0,
-    0, 1, 1, 0, 1, 0, 0, 1,
-    1, 1, 0, 0, 1, 0, 1, 0,
-    0, 0, 1, 1, 1, 1, 0, 1
-]).unsqueeze(0)
+# frozen_prior = torch.tensor([
+#     1, 0, 1, 1, 0, 1, 1, 0,
+#     0, 1, 1, 0, 1, 0, 0, 1,
+#     1, 1, 0, 0, 1, 0, 1, 0,
+#     0, 0, 1, 1, 1, 1, 0, 1
+# ]).unsqueeze(0)
 
-plot_code_aware_mask(frozen_prior)
+# plot_code_aware_mask(frozen_prior)
 
