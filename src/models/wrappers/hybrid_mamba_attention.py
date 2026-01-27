@@ -44,140 +44,116 @@ def f_mask_from_H(H):
     assert test.shape[0] == n_k and test.shape[1] == n+n_k 
     return test
 
-
 class ECCM_MambaBlock(nn.Module):
-    def __init__(self, D, S, L, H, k):
+    def __init__(self, D, S, H):
+        """
+        D: embedding dimension
+        S: state dimension (must be >= n-k)
+        H: parity check matrix, shape (n-k, n)
+        """
         super().__init__()
+
+        n_k, n = H.shape
+        L = 2 * n - n_k
+
+        assert S >= n_k, "State dimension S must be >= (n-k)"
+
         self.D = D
         self.S = S
-        self.L = L  # L = 2n - k
-        self.H = H
-        self.k = k
-        
-        # f(H) has shape (n-k) × (2n-k), but we need it as (2n-k) × (n-k) for masking
-        # since we apply it per position l in the sequence
+        self.L = L
+        self.n_k = n_k
 
-         # Create f(H) = [H; I_{n-k}]
-        self.fH = f_mask_from_H(H).T  # (n-k) × (2n-k) to (2n-k) x (n-k)
-        
+        # ---- register f(H) ----
+        fH = f_mask_from_H(H).T  # (2n-k, n-k)
+        self.register_buffer("fH", fH)
+
+        # ---- projections ----
         self.Wu = nn.Linear(D, D, bias=False)
         self.Wz = nn.Linear(D, D, bias=False)
-        self.conv = nn.Conv1d(D, D, kernel_size=3, padding=1, groups=D)
+
+        self.conv = nn.Conv1d(
+            D, D, kernel_size=3, padding=1, groups=D
+        )
 
         self.Wb = nn.Linear(D, S, bias=False)
         self.Wc = nn.Linear(D, S, bias=False)
         self.Wd = nn.Linear(D, D, bias=False)
 
-        self.A = nn.Parameter(torch.randn(D, S)*0.1)
+        # A ∈ R^{D×S}
+        self.A = nn.Parameter(0.1 * torch.randn(D, S))
+
+        # Skip connection
         self.R = nn.Parameter(torch.zeros(D))
 
-    def register_masks(self, H):
+    def _ssm_direction(self, u_conv: torch.Tensor, fH: torch.Tensor):
         """
-        H: parity check matrix, shape (n-k) × n
-        f(H) = [H; I_{n-k}], shape (n-k) × (2n-k)
-        
-        But for masking, we index by position l, so we transpose it
-        """
-        n_minus_k = H.shape[0]
-        n = H.shape[1]
-        
-       
-        
-        # Transpose for indexing by position l
-        self.register_buffer('fH', self.fH.T)  # Now (2n-k) × (n-k)
-        self.register_buffer('H', H)
-
-    def ssm_forward(self, u_conv, fH):
-        """
-        u_conv: [B, L, D] where L = 2n-k
-        fH: [L, n-k] - transposed f(H) mask for easy indexing by position
+        u_conv: [B, L, D]
+        fH: [L, n-k]
         """
         B, L, D = u_conv.shape
-        n_minus_k = fH.shape[1]  # n-k
-        
-        # Initialize state h as zeros [B, D, S]
-        h = torch.zeros((B, D, self.S), device=u_conv.device)
-        y = torch.zeros_like(u_conv)  # [B, L, D]
+        device = u_conv.device
+
+        # state h ∈ [B, D, S]
+        h = torch.zeros(B, D, self.S, device=device)
+        y = torch.zeros_like(u_conv)
 
         for l in range(L):
-            # Project current input
-            Bl = self.Wb(u_conv[:, l])  # [B, S]
-            Cl = self.Wc(u_conv[:, l])  # [B, S]
-            
-            # Compute delta - [B, D]
-            delta = torch.clamp(self.Wd(u_conv[:, l]), -2.0, 2.0)
+            ul = u_conv[:, l]  # [B, D]
 
-            
-            # Discretization (Eq. 11-12)
-            # Abar[b, d, s] = exp(A[d, s] * delta[b, d])
+            # projections
+            B_l = self.Wb(ul)  # [B, S]
+            C_l = self.Wc(ul)  # [B, S]
+            delta = torch.clamp(self.Wd(ul), -2.0, 2.0)  # [B, D]
+
+            # discretization
             Abar = torch.exp(
-    torch.clamp(self.A.unsqueeze(0) * delta.unsqueeze(-1), min=-20, max=20)
-)
+                torch.clamp(
+                    self.A.unsqueeze(0) * delta.unsqueeze(-1),
+                    min=-20.0,
+                    max=20.0,
+                )
+            )  # [B, D, S]
 
-            
-            # Bbar[b, d, s] = B[b, s] * delta[b, d]
-            Bbar = Bl.unsqueeze(1) * delta.unsqueeze(-1)  # [B, D, S]
-            
-            # Apply masking (Eq. 13-14)
-            # B̄ᵢₘ[l, d, s] = f(H)[l, d] * B̄ᵢ[l, d, s] if d < (n-k), else 0
-            # fH[l] has shape [n-k], we need to broadcast to [D, S]
-            
-            # For dimension d: only first (n-k) dimensions are masked
-            mask_d = torch.zeros(D, device=u_conv.device)
-            mask_d[:n_minus_k] = fH[l]  # fH[l] is shape [n-k]
-            
-            # Apply to Bbar: [B, D, S]
-            Bbar_M = Bbar * mask_d.unsqueeze(0).unsqueeze(-1)  # [B, D, S]
-            
-            # Cᵢₘ[l, s] = f(H)[l, s] * Cᵢ[l, s] if s < (n-k), else 0
-            # For dimension s: only first (n-k) dimensions are masked
-            mask_s = torch.zeros(self.S, device=u_conv.device)
-            mask_s[:n_minus_k] = fH[l]  # fH[l] is shape [n-k]
-            
-            Cl_M = Cl * mask_s.unsqueeze(0)  # [B, S]
-            
-            # State update (Eq. 15)
-            # h[d, s] = Abar[d, s] * h[d, s] + Bbar_M[d, s] * u_conv[l, d]
-            h = Abar * h + Bbar_M * u_conv[:, l].unsqueeze(-1)  # [B, D, S]
-            
-            # Output computation (Eq. 15 second part)
-            y[:, l] = (h * Cl_M.unsqueeze(1)).sum(dim=-1) + self.R * u_conv[:, l]
+            Bbar = B_l.unsqueeze(1) * delta.unsqueeze(-1)  # [B, D, S]
+
+            # ---- masking over STATE dimension ----
+            state_mask = torch.zeros(self.S, device=device)
+            state_mask[: self.n_k] = fH[l]  # [n-k]
+
+            Bbar = Bbar * state_mask.view(1, 1, self.S)
+            C_l = C_l * state_mask.view(1, self.S)
+
+            # state update
+            h = Abar * h + Bbar * ul.unsqueeze(-1)
+
+            # output
+            y[:, l] = (h * C_l.unsqueeze(1)).sum(dim=-1) + self.R * ul
 
         return y
 
     def forward(self, x):
         """
-        x: [B, L, D] where L = 2n-k
+        x: [B, L, D]
         """
-        # Forward direction
-        u = self.Wu(x)  # [B, L, D]
-        z = F.silu(self.Wz(x))  # [B, L, D]
-        
-        # 1D convolution over sequence (Eq. 7)
-        u_conv = self.conv(u.transpose(1, 2)).transpose(1, 2)  # [B, L, D]
-        
-        # SSM forward pass
-        u_ssm = self.ssm_forward(u_conv, self.fH)  # [B, L, D]
-        
-        # Gating (Eq. 16)
-        u_fwd = z * u_ssm  # [B, L, D]
+        # ---- forward direction ----
+        u = self.Wu(x)
+        z = F.silu(self.Wz(x))
 
-        # Backward direction (Eq. 17-20)
+        u_conv = self.conv(u.transpose(1, 2)).transpose(1, 2)
+        y_fwd = self._ssm_direction(u_conv, self.fH)
+        out_fwd = z * y_fwd
+
+        # ---- backward direction ----
         x_rev = torch.flip(x, dims=[1])
         u_rev = self.Wu(x_rev)
         z_rev = F.silu(self.Wz(x_rev))
         u_conv_rev = self.conv(u_rev.transpose(1, 2)).transpose(1, 2)
-        
-        # Flip the mask for backward pass
-        fH_rev = torch.flip(self.fH, dims=[0])
-        u_ssm_rev = self.ssm_forward(u_conv_rev, fH_rev)
-        u_bwd_rev = z_rev * u_ssm_rev
-        
-        # Reverse back (Eq. 19)
-        u_bwd = torch.flip(u_bwd_rev, dims=[1])
 
-        # Combine (Eq. 20)
-        return u_fwd + u_bwd
+        fH_rev = torch.flip(self.fH, dims=[0])
+        y_bwd_rev = self._ssm_direction(u_conv_rev, fH_rev)
+        out_bwd = torch.flip(z_rev * y_bwd_rev, dims=[1])
+
+        return out_fwd + out_bwd
 
 # -----------------------------
 # Transformer Block (HPSA masked attention)
@@ -256,7 +232,7 @@ class ECCM(nn.Module):
         layers = []
         for i in range(blocks):
             if i % 2 == 0:
-                layers.append(ECCM_MambaBlock(D, S, self.L, self.H, k))
+                layers.append(ECCM_MambaBlock(D, S, self.H))
             else:
                 layers.append(ECCM_AttnBlock(D, self.H))
         self.layers = nn.ModuleList(layers)
