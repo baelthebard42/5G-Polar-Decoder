@@ -68,7 +68,7 @@ class ECCM_MambaBlock(nn.Module):
         self.Wc = nn.Linear(D, S, bias=False)
         self.Wd = nn.Linear(D, D, bias=False)
 
-        self.A = nn.Parameter(torch.randn(D, S))
+        self.A = nn.Parameter(torch.randn(D, S)*0.1)
         self.R = nn.Parameter(torch.zeros(D))
 
     def register_masks(self, H):
@@ -105,7 +105,7 @@ class ECCM_MambaBlock(nn.Module):
             Cl = self.Wc(u_conv[:, l])  # [B, S]
             
             # Compute delta - [B, D]
-            delta = torch.clamp(self.Wd(u_conv[:, l]), -5.0, 5.0)
+            delta = torch.clamp(self.Wd(u_conv[:, l]), -2.0, 2.0)
 
             
             # Discretization (Eq. 11-12)
@@ -220,7 +220,7 @@ class ECCM_AttnBlock(nn.Module):
         
         # Apply mask: broadcast gH from [L, L] to [B, h, L, L]
         mask = self.gH[:L, :L].unsqueeze(0).unsqueeze(0)  # [1, 1, L, L]
-        attn = attn.masked_fill(mask == 0, -1e-9)
+        attn = attn.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(attn, dim=-1)
 
         # Compute attention output
@@ -251,7 +251,7 @@ class ECCM(nn.Module):
         n_k = self.H.shape[0]
         self.L = N+n_k # 2n-k
 
-        self.embed = nn.Parameter(torch.randn(self.L, D))
+        self.embed = nn.Parameter(torch.randn(self.L, D)/math.sqrt(D))
 
         layers = []
         for i in range(blocks):
