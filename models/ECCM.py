@@ -402,17 +402,43 @@ class EncoderLayer(torch.nn.Module):
             d_state=config.d_state
         )
 
+  
+    
+    def forward(self, emb, pc_mask):
+        mamba_forward_out = self.mamba.forward(emb, pc_mask)
+        mamba_reverse_out = self.mamba.forward(torch.flip(emb,[1]), torch.flip(pc_mask, [1]))
+ 
+        mamba_out = mamba_forward_out + torch.flip(mamba_reverse_out, [1])
+        
+
+
+        return mamba_out
+    
+
+# A Bi-Directional Mamba Layer with Masking.
+# "Mamba Block" in the paper
+class EncoderLayer_mamba_only(torch.nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        self.syndrom_length = config.code.pc_matrix.size(0)
+        self.n = config.code.n
+        self.mamba = ECCMLayer(
+            code=config.code,
+            d_model=config.d_model,
+            d_state=config.d_state
+        )
+
         self.norm = nn.LayerNorm(config.d_model)
     
     def forward(self, emb, pc_mask):
         mamba_forward_out = self.mamba.forward(emb, pc_mask)
         mamba_reverse_out = self.mamba.forward(torch.flip(emb,[1]), torch.flip(pc_mask, [1]))
         mamba_out = 0.5*(mamba_forward_out + torch.flip(mamba_reverse_out, [1]))
-    #    mamba_out = mamba_forward_out + torch.flip(mamba_reverse_out, [1])
+     
         
 
         return self.norm(mamba_out)
-     #   return mamba_out
+      
         
 
 # "Transformer Block" in the paper
@@ -449,6 +475,8 @@ class ECCM(torch.nn.Module):
         self.n = config.code.n
         self.syndrom_length = config.code.pc_matrix.size(0)
         self.register_buffer('pc_matrix', config.code.pc_matrix.float())
+        self.num_layers = config.N_dec
+        self.total_num_full_iterations = 0
 
         if config.mask_type == 'aecct_method':
             generate_mask = build_mask
@@ -486,7 +514,7 @@ class ECCM(torch.nn.Module):
             if p.dim() > 1:
                 torch.nn.init.xavier_uniform_(p)
 
-        self.enable_early_stopping = True # Non-configurable, set manually
+        self.enable_early_stopping = False # Non-configurable, set manually
     
     def _hidden_to_output(self, hidden):
         hidden = self.resize_output_dim(hidden)
@@ -497,9 +525,14 @@ class ECCM(torch.nn.Module):
         inp = torch.cat([magnitude, syndrome], -1)
         emb: torch.Tensor = self.src_embed.unsqueeze(0) * inp.unsqueeze(-1)
         hidden = emb
+        layer_count = 0
         
         outputs = []
         for current_mask, sublayer in zip(self.masks, self.sublayers):
+            layer_count += 1
+        #    print(f"In layer {layer_count}\n\n")
+            if layer_count==self.num_layers:
+                self.total_num_full_iterations +=1 
             hidden: torch.Tensor = sublayer.forward(hidden, current_mask())
             layer_out = self._hidden_to_output(hidden)
 
@@ -555,6 +588,8 @@ class ECCM_only_mamba(torch.nn.Module):
         self.n = config.code.n
         self.syndrom_length = config.code.pc_matrix.size(0)
         self.register_buffer('pc_matrix', config.code.pc_matrix.float())
+        self.total_num_full_iterations = 0
+        self.num_layers = config.N_dec_mamba
 
         if config.mask_type == 'aecct_method':
             generate_mask = build_mask
@@ -572,10 +607,10 @@ class ECCM_only_mamba(torch.nn.Module):
         sublayers = []
         self.masks = []
         
-        for i in range(config.N_dec):
+        for i in range(config.N_dec_mamba):
         #    layer_type, sublayer = get_sublayer(config, i)
           
-            sublayer = EncoderLayer(config)
+            sublayer = EncoderLayer_mamba_only(config)
 
             sublayers.append(sublayer)
             call = lambda : self.mamba_mask
@@ -598,7 +633,7 @@ class ECCM_only_mamba(torch.nn.Module):
             if p.dim() > 1:
                 torch.nn.init.xavier_uniform_(p)
 
-        self.enable_early_stopping = True # Non-configurable, set manually
+        self.enable_early_stopping = False # Non-configurable, set manually
     
     def _hidden_to_output(self, hidden):
         hidden = self.resize_output_dim(hidden)
@@ -610,9 +645,14 @@ class ECCM_only_mamba(torch.nn.Module):
         inp = torch.cat([magnitude, syndrome], -1)
         emb: torch.Tensor = self.src_embed.unsqueeze(0) * inp.unsqueeze(-1)
         hidden = emb
+        layer_count = 0
         
         outputs = []
         for current_mask, sublayer in zip(self.masks, self.sublayers):
+            layer_count += 1
+            if layer_count==self.num_layers:
+                self.total_num_full_iterations +=1 
+       #     print(f"In layer {layer_count}\n\n")
             hidden: torch.Tensor = sublayer.forward(hidden, current_mask())
             layer_out = self._hidden_to_output(hidden)
 

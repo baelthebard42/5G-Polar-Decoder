@@ -40,13 +40,14 @@ class Config():
 
     # dimensions
     N_dec: int = 8
-    d_model: int = 128
-    d_state: int = 128
+    N_dec_mamba: int = 4
+    d_model: int = 64
+    d_state: int = 64
     h: int = 8
     code: Code = None
 
     # other
-    path: str = "./results/run_6/FB695E38DCAC256534362A7B092CCBFD"
+    path: str = "./results/run_3/FB695E38DCAC256534362A7B092CCBFD"
 
     # lpe
     lpe_dim: int = 8
