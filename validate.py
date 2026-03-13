@@ -122,7 +122,7 @@ def find_experiments(test_result_dir):
     return experiments
 
 def validate(path):
-    EbNo_range_test = range(4, 7)
+    EbNo_range_test = range(-10, 10)
     experiments = set()
     for experiment in find_experiments(path):
         experiments.add(experiment)
@@ -148,7 +148,7 @@ def validate(path):
                 print(f'{experiment=}, checkpoint is missing the state dict')
             except Exception as err:
                 print(f'{experiment=}, failed to run for an unknown reason {err}')
-            with open(os.path.join(experiment, 'validation_hybrid_mamba_with_inf_time.json'), 'w') as f:
+            with open(os.path.join(experiment, 'validation_pure_mamba_with_inf_time.json'), 'w') as f:
                 json.dump(results, f)
 
 def parse_args():

@@ -47,7 +47,7 @@ class Config():
     code: Code = None
 
     # other
-    path: str = "./results/run_3/FB695E38DCAC256534362A7B092CCBFD"
+    path: str = None
 
     # lpe
     lpe_dim: int = 8

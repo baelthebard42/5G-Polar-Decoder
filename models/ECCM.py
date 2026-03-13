@@ -438,6 +438,65 @@ class EncoderLayer_mamba_only(torch.nn.Module):
         
 
         return self.norm(mamba_out)
+    
+
+    
+# block level residuals
+class EncoderLayer_mamba_only_with_residual(torch.nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        self.syndrom_length = config.code.pc_matrix.size(0)
+        self.n = config.code.n
+        self.mamba = ECCMLayer(
+            code=config.code,
+            d_model=config.d_model,
+            d_state=config.d_state
+        )
+
+        self.norm = nn.LayerNorm(config.d_model)
+        self.residual_gate = nn.Parameter(torch.tensor(1.0))
+    
+    def forward(self, emb, pc_mask):
+        
+
+        residual = emb
+        x = self.norm(emb)
+        mamba_forward_out = self.mamba.forward(emb, pc_mask)
+        mamba_reverse_out = self.mamba.forward(torch.flip(emb,[1]), torch.flip(pc_mask, [1]))
+        mamba_out = 0.5*(mamba_forward_out + torch.flip(mamba_reverse_out, [1]))
+     
+    
+        out =  self.residual_gate*residual + mamba_out
+
+        return out
+
+class EncoderLayer_mamba_only_with_residual_mlp(torch.nn.Module):
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+        self.syndrom_length = config.code.pc_matrix.size(0)
+        self.n = config.code.n
+        self.mamba = ECCMLayer(
+            code=config.code,
+            d_model=config.d_model,
+            d_state=config.d_state
+        )
+
+        self.norm = nn.LayerNorm(config.d_model)
+        self.residual_gate = nn.Parameter(torch.tensor(1.0))
+    
+    def forward(self, emb, pc_mask):
+        
+
+        residual = emb
+        x = self.norm(emb)
+        mamba_forward_out = self.mamba.forward(emb, pc_mask)
+        mamba_reverse_out = self.mamba.forward(torch.flip(emb,[1]), torch.flip(pc_mask, [1]))
+        mamba_out = 0.5*(mamba_forward_out + torch.flip(mamba_reverse_out, [1]))
+     
+    
+        out =  self.residual_gate*residual + mamba_out
+
+        return out
       
         
 
@@ -610,7 +669,7 @@ class ECCM_only_mamba(torch.nn.Module):
         for i in range(config.N_dec_mamba):
         #    layer_type, sublayer = get_sublayer(config, i)
           
-            sublayer = EncoderLayer_mamba_only(config)
+            sublayer = EncoderLayer_mamba_only_with_residual(config)
 
             sublayers.append(sublayer)
             call = lambda : self.mamba_mask

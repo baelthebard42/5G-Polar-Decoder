@@ -247,11 +247,13 @@ def main():
         'code_hint': args.code_hint
     }
 
+
+
     
 
     path = get_next_dir(args.path, )            
     config, model, optimizer, training_state, dataset, summary_writer = \
-        initialize(path, model_cls=ECCM_only_mamba, resume=True, **parameters)
+        initialize(path, model_cls=ECCM_only_mamba, resume=False, **parameters)
     model = train_model(
         config,
         model,

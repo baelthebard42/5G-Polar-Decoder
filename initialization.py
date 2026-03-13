@@ -226,6 +226,7 @@ def initialize(path, model_cls, optimizer_init=default_optimizer_init, experimen
     **parameters:
         will be passed to the `Config` object constructor, ignored if loading an experiment!
     """
+    print("using path", path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(device)
     config = create_config(output_path=path, resume=resume, **parameters)
