@@ -461,15 +461,17 @@ class EncoderLayer_mamba_only_with_residual(torch.nn.Module):
 
         residual = emb
         x = self.norm(emb)
-        mamba_forward_out = self.mamba.forward(emb, pc_mask)
-        mamba_reverse_out = self.mamba.forward(torch.flip(emb,[1]), torch.flip(pc_mask, [1]))
+        mamba_forward_out = self.mamba.forward(x, pc_mask)
+        mamba_reverse_out = self.mamba.forward(torch.flip(x,[1]), torch.flip(pc_mask, [1]))
         mamba_out = 0.5*(mamba_forward_out + torch.flip(mamba_reverse_out, [1]))
      
     
-        out =  self.residual_gate*residual + mamba_out
+        out =  residual + self.residual_gate*mamba_out
 
         return out
 
+
+# block level residuals and a small MLP (trying to make it similar to transformer's ffn )
 class EncoderLayer_mamba_only_with_residual_mlp(torch.nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
@@ -481,7 +483,14 @@ class EncoderLayer_mamba_only_with_residual_mlp(torch.nn.Module):
             d_state=config.d_state
         )
 
+        self.mlp = nn.Sequential(
+                nn.Linear(config.d_model, 4 * config.d_model),
+             nn.GELU(),
+           nn.Linear(4 * config.d_model, config.d_model)
+        )
+
         self.norm = nn.LayerNorm(config.d_model)
+        self.norm2 = nn.LayerNorm(config.d_model)
         self.residual_gate = nn.Parameter(torch.tensor(1.0))
     
     def forward(self, emb, pc_mask):
@@ -489,12 +498,143 @@ class EncoderLayer_mamba_only_with_residual_mlp(torch.nn.Module):
 
         residual = emb
         x = self.norm(emb)
-        mamba_forward_out = self.mamba.forward(emb, pc_mask)
-        mamba_reverse_out = self.mamba.forward(torch.flip(emb,[1]), torch.flip(pc_mask, [1]))
+        mamba_forward_out = self.mamba.forward(x, pc_mask)
+        mamba_reverse_out = self.mamba.forward(torch.flip(x,[1]), torch.flip(pc_mask, [1]))
         mamba_out = 0.5*(mamba_forward_out + torch.flip(mamba_reverse_out, [1]))
      
     
-        out =  self.residual_gate*residual + mamba_out
+        out =  residual + self.residual_gate*mamba_out
+
+        x = self.norm2(out)
+
+        out = out + self.mlp(x)
+        return out
+    
+# block level residuals and cnn
+class EncoderLayer_mamba_only_with_residual_cnn(torch.nn.Module):
+
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+
+        self.syndrom_length = config.code.pc_matrix.size(0)
+        self.n = config.code.n
+
+        self.mamba = ECCMLayer(
+            code=config.code,
+            d_model=config.d_model,
+            d_state=config.d_state
+        )
+
+        self.norm1 = nn.LayerNorm(config.d_model)
+        self.norm2 = nn.LayerNorm(config.d_model)
+
+        self.residual_gate = nn.Parameter(torch.tensor(1.0))
+
+        self.conv = nn.Conv1d(
+            config.d_model,
+            config.d_model,
+            kernel_size=3,
+            padding=1,
+            groups=config.d_model
+        )
+
+    def forward(self, emb, pc_mask):
+
+        residual = emb
+
+        # prenorm
+        x = self.norm1(emb)
+
+        # bidirectional mamba
+        mamba_forward_out = self.mamba(x, pc_mask)
+
+        mamba_reverse_out = self.mamba(
+            torch.flip(x, [1]),
+            torch.flip(pc_mask, [1])
+        )
+
+        mamba_reverse_out = torch.flip(mamba_reverse_out, [1])
+
+        mamba_out = 0.5 * (mamba_forward_out + mamba_reverse_out)
+
+        # depthwise conv
+        x = mamba_out.transpose(1, 2)
+        x = self.conv(x)
+        x = x.transpose(1, 2)
+
+        # residual
+        x = residual + self.residual_gate * x
+
+        # output norm
+        out = self.norm2(x)
+
+        return out
+    
+# block level residuals and cnn
+class EncoderLayer_mamba_only_with_residual_cnn_mlp(torch.nn.Module):
+
+    def __init__(self, config: Config) -> None:
+        super().__init__()
+
+        self.syndrom_length = config.code.pc_matrix.size(0)
+        self.n = config.code.n
+
+        self.mamba = ECCMLayer(
+            code=config.code,
+            d_model=config.d_model,
+            d_state=config.d_state
+        )
+
+        self.norm1 = nn.LayerNorm(config.d_model)
+        self.norm2 = nn.LayerNorm(config.d_model)
+
+        self.residual_gate = nn.Parameter(torch.tensor(1.0))
+
+        self.conv = nn.Conv1d(
+            config.d_model,
+            config.d_model,
+            kernel_size=3,
+            padding=1,
+            groups=config.d_model
+        )
+
+        self.mlp = nn.ModuleList(
+                nn.Linear(config.d_model, 4 * config.d_model),
+             nn.GELU(),
+           nn.Linear(4 * config.d_model, config.d_model)
+        )
+
+    def forward(self, emb, pc_mask):
+
+        residual = emb
+
+        # prenorm
+        x = self.norm1(emb)
+
+        # bidirectional mamba
+        mamba_forward_out = self.mamba(x, pc_mask)
+
+        mamba_reverse_out = self.mamba(
+            torch.flip(x, [1]),
+            torch.flip(pc_mask, [1])
+        )
+
+        mamba_reverse_out = torch.flip(mamba_reverse_out, [1])
+
+        mamba_out = 0.5 * (mamba_forward_out + mamba_reverse_out)
+
+        # depthwise conv
+        x = mamba_out.transpose(1, 2)
+        x = self.conv(x)
+        x = x.transpose(1, 2)
+
+        # residual
+        x = residual + self.residual_gate * x
+
+        # output norm
+        out = self.norm2(x)
+
+        out = x + self.mlp(out)
 
         return out
       
@@ -669,7 +809,7 @@ class ECCM_only_mamba(torch.nn.Module):
         for i in range(config.N_dec_mamba):
         #    layer_type, sublayer = get_sublayer(config, i)
           
-            sublayer = EncoderLayer_mamba_only_with_residual(config)
+            sublayer = EncoderLayer_mamba_only_with_residual_mlp(config)
 
             sublayers.append(sublayer)
             call = lambda : self.mamba_mask
