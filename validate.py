@@ -107,7 +107,7 @@ def _test(config, model, EbNo_range_test):
                                         batch_size=config.test_batch_size, shuffle=False, num_workers=1) for ii in range(len(std_test))]
     return test(model, 'cuda', test_dataloader_list, EbNo_range_test)
 
-TEST_BATCH_SIZE = 512
+TEST_BATCH_SIZE = 128
 def load_path(path, best=False, best_ber=None):
     config, model, *rest = initialize(path, ECCM_only_mamba, experiment=True, summary=False, best=best, best_ber=best_ber)
     config.test_batch_size = TEST_BATCH_SIZE
@@ -122,7 +122,7 @@ def find_experiments(test_result_dir):
     return experiments
 
 def validate(path):
-    EbNo_range_test = range(-10, 10)
+    EbNo_range_test = [4, 4.5, 5, 5.5, 6]
     experiments = set()
     for experiment in find_experiments(path):
         experiments.add(experiment)

@@ -598,7 +598,7 @@ class EncoderLayer_mamba_only_with_residual_cnn_mlp(torch.nn.Module):
             groups=config.d_model
         )
 
-        self.mlp = nn.ModuleList(
+        self.mlp = nn.Sequential(
                 nn.Linear(config.d_model, 4 * config.d_model),
              nn.GELU(),
            nn.Linear(4 * config.d_model, config.d_model)
@@ -809,7 +809,7 @@ class ECCM_only_mamba(torch.nn.Module):
         for i in range(config.N_dec_mamba):
         #    layer_type, sublayer = get_sublayer(config, i)
           
-            sublayer = EncoderLayer_mamba_only_with_residual_mlp(config)
+            sublayer = EncoderLayer_mamba_only_with_residual_cnn_mlp(config)
 
             sublayers.append(sublayer)
             call = lambda : self.mamba_mask
