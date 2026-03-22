@@ -122,7 +122,7 @@ def find_experiments(test_result_dir):
     return experiments
 
 def validate(path):
-    EbNo_range_test = [4, 4.5, 5, 5.5, 6]
+    EbNo_range_test = range(-10, 11)
     experiments = set()
     for experiment in find_experiments(path):
         experiments.add(experiment)

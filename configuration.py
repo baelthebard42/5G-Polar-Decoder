@@ -32,7 +32,7 @@ class Config():
     layout: str = 'MT'
     experiment_type: str = None
     attention_type: Literal['aecct'] = 'aecct'
-    mask_type: Literal['pc_matrix', 'aecct_method'] = 'pc_matrix'
+    mask_type: Literal['pc_matrix', 'aecct_method'] = 'aecct_method'
     enable_multi_loss: bool = True
 
     # code params

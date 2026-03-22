@@ -4,6 +4,7 @@ from dataset import BER, bin_to_sign
 from configuration import Config
 from validate import validate
 from models.ECCM import ECCM, ECCM_only_mamba
+from models.AECCT import ECC_Transformer_original
 
 from torch.utils.tensorboard import SummaryWriter
 import torch
@@ -253,7 +254,7 @@ def main():
 
     path = get_next_dir(args.path, )            
     config, model, optimizer, training_state, dataset, summary_writer = \
-        initialize(path, model_cls=ECCM_only_mamba, resume=False, **parameters)
+        initialize(path, model_cls=ECC_Transformer_original, resume=False, **parameters)
     model = train_model(
         config,
         model,
