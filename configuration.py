@@ -32,7 +32,7 @@ class Config():
     layout: str = 'MT'
     experiment_type: str = None
     attention_type: Literal['aecct'] = 'aecct'
-    mask_type: Literal['pc_matrix', 'aecct_method'] = 'aecct_method'
+    mask_type: Literal['pc_matrix', 'aecct_method'] = 'pc_matrix'
     enable_multi_loss: bool = True
 
     # code params
@@ -47,7 +47,7 @@ class Config():
     code: Code = None
 
     # other
-    path: str = None
+    path: str = "./results/run_5/A80CA95758A6A09B268BBFE0E0754094"
 
     # lpe
     lpe_dim: int = 8

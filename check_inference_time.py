@@ -5,6 +5,8 @@ from dataset import ECC_Dataset, EbN0_to_std
 from configuration import Code, Config
 from initialization import code_from_hint, config_hash
 from models.ECCM import ECCM, ECCM_only_mamba
+from models.AECCT import ECC_Transformer_original
+from typing import Any, Literal, Optional
 
 
 
@@ -13,6 +15,7 @@ def create_config(
         code_hint="POLAR_N128_K86",
         d_model=128,
         N_dec=8,
+        N_dec_mamba=4,
         warmup_lr=1.0e-3,
         warmup_length=10,
         lr=5e-4,
@@ -21,13 +24,15 @@ def create_config(
         batch_size=64,
         gradient_clipping=1.0,
         resume=False,
-        **kwargs
+        mask_type: Literal['pc_matrix', 'aecct_method'] = 'pc_matrix'
+    
     ):
     code = code_from_hint(code_hint)
     config = Config(
         code=code,
         d_model=d_model, # example_code.n + H.shape[0],
         N_dec=N_dec,
+        N_dec_mamba=N_dec_mamba,
         warmup_lr=warmup_lr,
         warmup_length=warmup_length,
         lr=lr,
@@ -35,7 +40,8 @@ def create_config(
         eta_min=eta_min,
         batch_size=batch_size,
         gradient_clipping=gradient_clipping,
-        **kwargs
+        mask_type=mask_type
+    
     )
     if config.experiment_type:
         path = os.path.join(output_path, config.experiment_type, config_hash(config))
@@ -47,29 +53,18 @@ def create_config(
      config.path = path
 
     return config
-
 def check_inference_time(
     model_class,
     config,
     device="cuda",
     EbNo=4,
-    num_batches=100,
-    batch_size=512,
+    num_batches=100000 ,
+    batch_size=128,
+    is_ecct=False   # ✅ NEW FLAG
 ):
-    """
-    Measures inference time for a given model architecture.
-
-    Args:
-        model_class: ECCM or ECCM_only_mamba
-        config: experiment config
-        device: "cuda" or "cpu"
-        EbNo: Eb/N0 point to test at
-        num_batches: number of batches to time
-        batch_size: batch size for inference
-
-    Returns:
-        dict with timing statistics
-    """
+    import torch
+    import time
+    from dataset import bin_to_sign
 
     # ---- model ----
     model = model_class(config).to(device)
@@ -106,6 +101,11 @@ def check_inference_time(
             magnitude = magnitude.to(device)
             syndrome = syndrome.to(device)
             y = y.to(device)
+            x = x.to(device)
+
+            # Only needed for ECCT
+            if is_ecct:
+                z_mul = (y * bin_to_sign(x))
 
             # ---- timing start ----
             if device == "cuda":
@@ -113,12 +113,18 @@ def check_inference_time(
             start = time.perf_counter()
 
             z_pred = model(magnitude, syndrome)
-            _ = model.get_codeword(z_pred, y)
 
+            if is_ecct:
+                # ✅ ECCT decoding (real inference)
+                _loss, x_pred = model.loss(-z_pred, z_mul, y)
+            else:
+                # ✅ Mamba decoding
+                x_pred = model.get_codeword(z_pred, y)
+
+            # ---- timing end ----
             if device == "cuda":
                 torch.cuda.synchronize()
             end = time.perf_counter()
-            # ---- timing end ----
 
             batch_time = end - start
             total_time += batch_time
@@ -134,14 +140,13 @@ def check_inference_time(
     }
 
 def main():
+    config_mamba_cnn = create_config(d_model=64, N_dec_mamba=4)
+    t1 = check_inference_time(model_class=ECCM_only_mamba, config=config_mamba_cnn)
+    print(f"Average Inference Time for Mamba-CNN: {t1["avg_time_per_codeword"]*1000000} microseconds\n\n")
 
-    config_original = create_config( d_model=128, N_dec=8)
-    config_pure_mamba = create_config(d_model=64, N_dec=4)
-
-    t1 = check_inference_time(model_class=ECCM, config=config_original)
-    print(f"Average Inference Time for original: {t1["avg_time_per_codeword"]*1000000} microseconds\n\n")
-    t2 = check_inference_time(model_class=ECCM_only_mamba, config=config_pure_mamba)
-    print(f"Average Inference Time for pure mamba reduced: {t2["avg_time_per_codeword"]*1000000} microseconds\n\n")
+    # config_ecct = create_config(d_model=64, N_dec=8, mask_type='aecct_method')
+    # t2 = check_inference_time(model_class=ECC_Transformer_original, config=config_ecct, is_ecct=True)
+    # print(f"Average Inference Time for ECCT: {t2["avg_time_per_codeword"]*1000000} microseconds\n\n")
 
 main()
 

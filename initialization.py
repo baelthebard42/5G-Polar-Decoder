@@ -4,10 +4,20 @@ from dataset import ECC_Dataset, EbN0_to_std, get_generator_and_parity
 from torch.utils.tensorboard import SummaryWriter
 import torch
 from torch.utils.data import DataLoader
-import os
+import os, sys
 import logging
 from hashlib import md5
 from dataclasses import fields, MISSING
+from models.AECCT import ECC_Transformer_original
+import models.AECCT
+
+sys.modules['Model'] = models.AECCT
+
+
+
+
+import torch.serialization
+torch.serialization.add_safe_globals([ECC_Transformer_original])
 
 
 CODES_PATH = os.path.join(os.path.dirname(__file__), "codes")
@@ -128,9 +138,10 @@ def load_checkpoint(path):
         **config_dict
     )
     if os.path.isfile(model_path := os.path.join(path, 'model')):
-        checkpoint['model'] = torch.load(model_path)
+        checkpoint['model'] = torch.load(model_path, weights_only=False, map_location="cuda")
+ 
     if os.path.isfile(model_path := os.path.join(path, 'best_model')):
-        checkpoint['best_model'] = torch.load(model_path)
+        checkpoint['best_model'] = torch.load(model_path, weights_only=False)
     if os.path.isfile(optimizer_path := os.path.join(path, 'optimizer')):
         checkpoint['optimizer'] = torch.load(optimizer_path)
     if os.path.isfile(scheduler_path := os.path.join(path, 'scheduler')):

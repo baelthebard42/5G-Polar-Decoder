@@ -53,6 +53,7 @@ def test(model, device, test_loader_list, EbNo_range_test, tqdm=tqdm):
             test_ber = cum_count = 0.
             for m, x, z, y, magnitude, syndrome in tqdm(test_loader, position=0, leave=True, desc="Testing"):
                 z_pred = model(magnitude.to(device), syndrome.to(device))
+                
                 x_pred = model.get_codeword(z_pred, y.to(device))
 
                 test_ber += BER(x_pred, x.to(device)) * x.shape[0]
@@ -254,7 +255,7 @@ def main():
 
     path = get_next_dir(args.path, )            
     config, model, optimizer, training_state, dataset, summary_writer = \
-        initialize(path, model_cls=ECC_Transformer_original, resume=False, **parameters)
+        initialize(path, model_cls=ECC_Transformer_original, resume=True, **parameters)
     model = train_model(
         config,
         model,

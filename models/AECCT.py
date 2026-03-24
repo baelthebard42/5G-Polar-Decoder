@@ -384,7 +384,7 @@ class ECC_Transformer_original(nn.Module):
     def __init__(self, config:Config, dropout=0):
         super(ECC_Transformer_original, self).__init__()
         ####
-        print("config:",config)
+    #    print("config:",config)
         code = config.code
         c = copy.deepcopy
         attn = MultiHeadedAttention_original(config.h, config.d_model)
