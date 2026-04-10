@@ -23,6 +23,7 @@ def train_epoch(model, device, train_loader, optimizer, epoch, LR, config: Confi
     t = time.time()
     batch_idx = 0
     for m, x, z, y, magnitude, syndrome in tqdm(train_loader, position=0, leave=True, desc="Training"):
+     
         z_mul = (y * bin_to_sign(x)) # x = 1, y = -1 => z_mul = -1
         z_pred = model(magnitude.to(device), syndrome.to(device))
         loss, x_pred = model.loss(z_pred, z_mul.to(device), y.to(device))
@@ -255,7 +256,7 @@ def main():
 
     path = get_next_dir(args.path, )            
     config, model, optimizer, training_state, dataset, summary_writer = \
-        initialize(path, model_cls=ECC_Transformer_original, resume=True, **parameters)
+        initialize(path, model_cls=ECCM_only_mamba, resume=True, **parameters)
     model = train_model(
         config,
         model,

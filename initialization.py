@@ -73,6 +73,7 @@ def update_journal(path, config):
 def code_from_hint(hint: str,):
     hint = hint.upper()
     code_files = os.listdir(CODES_PATH)
+  
     code_files = [f for f in code_files if hint in f][0]
     code_n = int(code_files.split('_')[1][1:])
     code_k = int(code_files.split('_')[-1][1:].split('.')[0])

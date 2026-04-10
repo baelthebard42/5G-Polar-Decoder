@@ -135,14 +135,16 @@ class ECC_Dataset(data.Dataset):
     def __len__(self):
         return self.len
 
-    def __getitem__(self, index):
+    def __getitem__(self, index, msg_bits=None):
         if self.zero_cw is None:
-            m = torch.randint(0, 2, (1, self.code.k)).squeeze()
+
+            
+            m = torch.randint(0, 2, (1, self.code.k)).squeeze() 
             x = torch.matmul(m, self.generator_matrix) % 2
         else:
             m = self.zero_word
             x = self.zero_cw
-        z = torch.randn(self.code.n) * self.sigma[index%len(self.sigma)]
+        z = torch.randn( self.code.n) * self.sigma[index%len(self.sigma)]
         y = bin_to_sign(x) + z
         magnitude = torch.abs(y)
         syndrome = torch.matmul(sign_to_bin(torch.sign(y)).long(),
