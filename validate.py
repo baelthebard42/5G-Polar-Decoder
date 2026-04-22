@@ -33,6 +33,8 @@ def test(model, device, test_loader_list, EbNo_range_test, is_ecct, min_FER=100)
     with torch.no_grad():
         for ii, test_loader in enumerate(test_loader_list):
 
+           
+
             model.total_num_full_iterations = 0
 
             test_loss = 0.0
@@ -60,6 +62,7 @@ def test(model, device, test_loader_list, EbNo_range_test, is_ecct, min_FER=100)
 
                     # ---- forward ----
                     z_pred = model(magnitude.to(device), syndrome.to(device))
+               
 
                     if is_ecct:
                         # ECCT-style processing
@@ -134,13 +137,13 @@ def _test(config, model, EbNo_range_test):
 
     code = config.code
     std_test = [EbN0_to_std(ii, code.k / code.n) for ii in EbNo_range_test]
-    test_dataloader_list = [DataLoader(ECC_Dataset(code, [std_test[ii]], len=int(config.test_batch_size)*1000, zero_cw=False),
+    test_dataloader_list = [DataLoader(ECC_Dataset(code, [std_test[ii]], len=int(config.test_batch_size)*9375, zero_cw=False),
                                         batch_size=config.test_batch_size, shuffle=False, num_workers=1) for ii in range(len(std_test))]
-    return test(model, 'cuda', test_dataloader_list, EbNo_range_test, is_ecct=True)
+    return test(model, 'cuda', test_dataloader_list, EbNo_range_test, is_ecct=False)
 
-TEST_BATCH_SIZE = 128
+TEST_BATCH_SIZE = 16
 def load_path(path, best=False, best_ber=None):
-    config, model, *rest = initialize(path, ECC_Transformer_original, experiment=True, summary=False, best=best, best_ber=best_ber)
+    config, model, *rest = initialize(path, ECCM_only_mamba, experiment=True, summary=False, best=best, best_ber=best_ber)
     config.test_batch_size = TEST_BATCH_SIZE
     return config, model
 
@@ -153,7 +156,7 @@ def find_experiments(test_result_dir):
     return experiments
 
 def validate(path):
-    EbNo_range_test = range(4, 6)
+    EbNo_range_test = range(-10, 11)
     experiments = set()
     for experiment in find_experiments(path):
         experiments.add(experiment)
@@ -179,8 +182,9 @@ def validate(path):
                 print(f'{experiment=}, checkpoint is missing the state dict')
             except Exception as err:
                 print(f'{experiment=}, failed to run for an unknown reason {err}')
-            with open(os.path.join(experiment, 'validation_ecct_with_inf_time.json'), 'w') as f:
-                json.dump(results, f)
+            with open(os.path.join(experiment, 'validation_mamba_cnn_150000_instances.json'), 'w') as f:
+                json.dump(results, f, indent=4)
+
 
 def parse_args():
     parser = ArgumentParser('validate')

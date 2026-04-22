@@ -21,7 +21,7 @@ class Config():
     lr: float = 2.5e-4
     gpus: str = '-1'
     batch_size: int = 128
-    test_batch_size: int = 128
+    test_batch_size: int = 16
     train_batch_count: int = 1000
     test_batch_count: int = 1000
     seed: int = 42
@@ -47,7 +47,7 @@ class Config():
     code: Code = None
 
     # other
-    path: str = "./results/run_7/46DCB4919A98C1532600B4D7134ECA28"
+    path: str = "./results/run_7/A3160DF5BB50FB42672C6D2F8987AB47"
 
     # lpe
     lpe_dim: int = 8

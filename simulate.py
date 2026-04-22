@@ -1,6 +1,6 @@
 from PIL import Image
 import numpy as np
-import io
+import io, os
 from initialization import code_from_hint, initialize
 from configuration import Code
 from argparse import ArgumentParser
@@ -8,7 +8,19 @@ import json
 from dataset import EbN0_to_std
 from models.ECCM import ECCM_only_mamba
 import torch
+from datetime import datetime
 
+
+def create_new_dir(root_path: str) -> str:
+    """
+    Creates a new directory inside root_path using current timestamp
+    and returns the full path.
+    """
+
+    dir_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    full_path = os.path.join(root_path, dir_name)
+    os.makedirs(full_path, exist_ok=True)
+    return full_path
 
 def load_image(path: str):
     img = Image.open(path).convert("RGB")
@@ -117,9 +129,9 @@ def get_codeword_from_model(model, y, mag, syn, device, batch_size=1024):
     outputs = []
     n = y.shape[0]
     with torch.no_grad():
-        print(f"Starting model inference...\n\n")
+     #   print(f"Starting model inference...\n\n")
         for i in range(0, n, batch_size):
-            print(f"Processing step {i}\n")
+     #       print(f"Processing step {i}\n")
             y_batch = y[i:i+batch_size].to(device)
             mag_batch = mag[i:i+batch_size].to(device)
             syn_batch = syn[i:i+batch_size].to(device)
@@ -129,13 +141,105 @@ def get_codeword_from_model(model, y, mag, syn, device, batch_size=1024):
     x_pred = torch.cat(outputs, dim=0)
     return x_pred
 
+def frange(start, stop, step):
+    while start <= stop:
+        yield round(start, 6)  
+        start += step
+
+
+def bp_decode_llr(y, H, max_iter=20):
+    """
+    Belief Propagation (Min-Sum) LDPC decoder.
+
+    Args:
+        y: (N, n) received BPSK symbols
+        H: (m, n) parity-check matrix (0/1)
+        max_iter: iterations
+
+    Returns:
+        x_hat: decoded bits (N, n)
+    """
+
+    device = y.device
+    N, n = y.shape
+    m = H.shape[0]
+
+    H = H.to(device)
+
+    # BPSK LLR initialization: L = 2y/sigma^2 (sigma absorbed already in y scaling)
+    # since y = ±1 + noise, we approximate:
+    L_ch = 2 * y
+
+    # messages: variable -> check and check -> variable
+    # shape: (m, n)
+    msg_vc = torch.zeros((N, m, n), device=device)
+    msg_cv = torch.zeros((N, m, n), device=device)
+
+    for _ in range(max_iter):
+
+        # -------------------------
+        # Check node update
+        # -------------------------
+        for i in range(m):
+            idx = (H[i] == 1).nonzero(as_tuple=True)[0]
+            if len(idx) == 0:
+                continue
+
+            for j in idx:
+                others = idx[idx != j]
+
+                if len(others) == 0:
+                    msg_cv[:, i, j] = 0
+                    continue
+
+                signs = torch.prod(torch.sign(msg_vc[:, i, others]), dim=1)
+                min_vals = torch.min(torch.abs(msg_vc[:, i, others]), dim=1).values
+
+                msg_cv[:, i, j] = signs * min_vals
+
+        # -------------------------
+        # Variable node update
+        # -------------------------
+        for j in range(n):
+            idx = (H[:, j] == 1).nonzero(as_tuple=True)[0]
+
+            if len(idx) == 0:
+                continue
+
+            incoming = msg_cv[:, idx, j].sum(dim=1)
+            for i in idx:
+                msg_vc[:, i, j] = L_ch[:, j] + incoming - msg_cv[:, i, j]
+
+    # Final LLR
+    L_final = L_ch + msg_cv.sum(dim=1)
+    x_hat = (L_final < 0).long()
+
+    return x_hat
+
+def decode_with_bp(y, code, max_iter=20):
+    """
+    BP decoder entry point matching your model interface.
+    """
+
+    return bp_decode_llr(y, code.pc_matrix, max_iter=max_iter)
+
 
 def parse_args(args=None):
     argparser = ArgumentParser('simulate')
     argparser.add_argument('--code-hint', dest='code_hint', type=str, required=True, help="String hint for code that the decoder will be trained on see the codes dir for available codes")
     argparser.add_argument('--path', dest='path', default='results', required=False, help="Path where the results are saved [Default: results]")
     argparser.add_argument("--snr_lower", dest="snr_lower", type=float, required=True, help="decides lower noise level to corrupt the transmitted bits during simulation")
-    argparser.add_argument("--snr_upper", dest="snr_upper", type=str, required=True, help="decides lower noise level to corrupt the transmitted bits during simulation")
+    argparser.add_argument("--snr_upper", dest="snr_upper", type=float, required=True, help="decides upper noise level to corrupt the transmitted bits during simulation")
+    argparser.add_argument("--snr_step", dest="snr_step", type=float, required=True, help="step increment in snr for simulation")
+    argparser.add_argument("--img_data_path", dest="img_data_path", type=str, required=True, help="a folder full of image files to transmit data")
+    argparser.add_argument("--results_path", dest="results_path", type=str, required=True, help="resulting images and evaluations will be saved in the folder")
+    argparser.add_argument(
+    "--decoder",
+    type=str,
+    default="model",
+    choices=["model", "bp"],
+    help="Choose decoding method: model or belief propagation"
+)
     return argparser.parse_args(args=args)
 
 
@@ -146,24 +250,89 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}\n\n")
     args = parse_args()
+    saving_directory_path = create_new_dir(args.results_path)
 
     config, model = load_path(args.path)
-
-    bitstream, original_length = img_to_bitstream(load_image("./bird_original.jpeg"))
     code = code_from_hint(args.code_hint)
+    test_results = {}
+    test_results['model_type'] = config.path
+    test_results['code_type'] = args.code_hint
+    test_results['snr_lower'] = args.snr_lower
+    test_results['snr_upper'] = args.snr_upper
+    
+    for i, each_img_path in enumerate(os.listdir(args.img_data_path)):
+        print(f"Processing image {i}: {each_img_path}...\n\n")
+        
+        test_results[i]={}
+        test_results[i]['image_name']=each_img_path
+        bitstream, original_length = img_to_bitstream(load_image(os.path.join(args.img_data_path, each_img_path)))
+    
+      
 
-    for snr in range(args.snr_lower, args.snr_upper+1):
-        print(f"\n\nSimulating transmission for SNR={snr} dB...\n\n")
-        sigma = EbN0_to_std(EbN0=snr, rate=code.k/code.n)
-        chunks = bitarray_to_chunks(k=code.k, bit_array=bitstream)
-        _, x, _, y, mag, syn = create_data_from_chunks(chunks, code, sigma)
-        predicted_codewords = get_codeword_from_model(model, y, mag, syn, device)
-        print(f"Bit error rate for model output: {BER(predicted_codewords, x)}")
-        recovered_message_bits = encoded_to_msg_bits(predicted_codewords, code)
-        recovered_bitstream = chunks_to_bitarray(recovered_message_bits)
-        recovered_image = bitstream_to_img(recovered_bitstream)
-        recovered_image.save(f"recovered_snr_{args.snr}.jpg")
-   
+        for snr in frange(args.snr_lower, args.snr_upper, args.snr_step):
+            snr_str = f"{snr:.2f}".replace('.', '_')
+            snr_folder_path = os.path.join(saving_directory_path, f'snr_{snr_str}_db_transmitted')
+            os.makedirs(snr_folder_path, exist_ok=True)
+            test_results[i][f'snr_{snr_str}'] = {}
+            print(f"Simulating transmission for SNR={snr_str} dB...\n")
+            sigma = EbN0_to_std(EbN0=snr, rate=code.k/code.n)
+            chunks = bitarray_to_chunks(k=code.k, bit_array=bitstream)
+            _, x, _, y, mag, syn = create_data_from_chunks(chunks, code, sigma)
+
+
+            if args.decoder == "model":
+             predicted_codewords = get_codeword_from_model(model, y, mag, syn, device)
+            elif args.decoder == "bp":
+             predicted_codewords = decode_with_bp(y, code, max_iter=30)
+            else:
+             raise ValueError("Unknown decoder")
+            ber = BER(predicted_codewords, x)
+            test_results[i][f'snr_{snr_str}']['BER'] = ber
+            print(f"Bit error rate(BER) = {ber}")
+
+            recovered_message_bits = encoded_to_msg_bits(predicted_codewords, code)
+            recovered_bitstream = chunks_to_bitarray(recovered_message_bits)
+
+            recovered_image = bitstream_to_img(recovered_bitstream)
+
+            if recovered_image is not None:
+                recovered_image.save(os.path.join(snr_folder_path, f"{each_img_path.split(".")[0]}_recovered.jpg"))
+
+
+    overall_metrics = {}
+
+    num_images = len(os.listdir(args.img_data_path))
+
+    for snr in frange(args.snr_lower, args.snr_upper + 1, args.snr_step):
+        snr_str = f"{snr:.2f}".replace('.', '_')
+        ber_values = []
+
+        for i in range(num_images):
+            try:
+                ber = test_results[i][f'snr_{snr_str}']['BER']
+                ber_values.append(ber)
+            except KeyError:
+                continue
+
+        if ber_values:
+            avg_ber = sum(ber_values) / len(ber_values)
+        else:
+            avg_ber = None
+
+        overall_metrics[f'snr_{snr_str}'] = {
+            "average_BER": avg_ber
+        }
+
+    test_results['overall_metrics'] = overall_metrics
+
+
+    json_path = os.path.join(saving_directory_path, f"test_results_{args.decoder}.json")
+
+    with open(json_path, "w") as f:
+        json.dump(test_results, f, indent=4)
+
+    print(f"\nSaved all test statistics and recovered data in directory {saving_directory_path}")
+    
 
 
 
