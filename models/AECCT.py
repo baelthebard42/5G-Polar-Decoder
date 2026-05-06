@@ -442,4 +442,7 @@ class ECC_Transformer_original(nn.Module):
         logging.info(
             f'Self-Attention Sparsity Ratio={100 * torch.sum((src_mask).int()) / a:0.2f}%, Self-Attention Complexity Ratio={100 * torch.sum((~src_mask).int())//2 / a:0.2f}%')
         self.register_buffer('src_mask', src_mask)
+    
+    def get_codeword(self, z_pred, y):
+        return sign_to_bin(torch.sign(-z_pred * torch.sign(y)))
 

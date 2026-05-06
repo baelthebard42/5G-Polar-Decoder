@@ -1,0 +1,21 @@
+DO NOT recreate parity matrices since masks of mamba 
+depend on them. if we have to recreate, we need to retrain
+each model using them.
+
+instead lets focus on making the output to systematic form
+so we can simply slice it.
+
+
+how it was solved:
+
+I needed a way to convert the non systematic output to systematic so i could slice it. so, what we did was:
+
+1. convert the non systematic G (generator) matrix to systematic form, but record the swappings of columns along the way in form of an array. specifically, 
+an array such that array[i] = j means the column i originally is now shifted to column j. this is called column permuation array. it can be
+used to change any systematic form codeword to non systematic since it has recorded the mappings. (model_output[col_perm] will convert the 
+systematic model output to non systematic.)
+
+note: if col_perm = [0, 1, 2, 5, 4, 3] then the effect of model_output[col_perm] will be that index 3's position will get value from index 5 and so on.
+
+2. but what we needed was vice versa. so we create an inverse of column perm, such that array[j] = i. this can now be used to map
+any non systematic form output to systematic form. hence, then allows us to slice the codewords for message bits extraction.

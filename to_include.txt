@@ -1,0 +1,9 @@
+in model results:
+
+1. experimental setup
+2. model parameters (ecct, eccm)
+3. training results (loss-ber trend with epochs plot for any one decoder, preferably ldpc)
+4. ber results: this needs a table of BER comparison (-ve ln of BER). specifically, a table with mamba-cnn, ecct, bp (ldpc only) and scl (polar only)
+   on row side and BER values for snrs from 3 to 6 (inclusive, step of 1) on column side, each snr includes 32, 64, 128 subsections. also a plot for 2 
+   of the code families  on snr varying from 3 to 6. sequence length of atleast one should be 128, another can be 32 or 64.
+   

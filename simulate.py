@@ -7,7 +7,8 @@ from argparse import ArgumentParser
 import json
 from dataset import EbN0_to_std
 from models.ECCM import ECCM_only_mamba
-import torch
+from models.AECCT import ECC_Transformer_original
+import torch, random
 from datetime import datetime
 
 
@@ -22,12 +23,28 @@ def create_new_dir(root_path: str) -> str:
     os.makedirs(full_path, exist_ok=True)
     return full_path
 
+def load_col_perm(perm_path):
+    """
+    Loads col_perm and col_perm_inv from the .npz artifact produced by
+    precompute_systematic_transform.py.
+
+    Returns
+    -------
+    col_perm : list[int]  — original→permuted mapping
+    inv_perm : list[int]  — permuted→original mapping (inverse)
+    """
+    data = np.load(perm_path)
+    col_perm = data["col_perm"].tolist()
+    inv_perm = data["col_perm_inv"].tolist()
+    return col_perm, inv_perm
+
+
 def load_image(path: str):
     img = Image.open(path).convert("RGB")
     return img
 
 def load_path(path, best=False, best_ber=None):
-    config, model, dataset, *rest = initialize(path, ECCM_only_mamba, experiment=True, summary=False, best=best, best_ber=best_ber)
+    config, model, dataset, *rest = initialize(path, ECC_Transformer_original, experiment=True, summary=False, best=best, best_ber=best_ber)
     return config, model
 
 
@@ -48,6 +65,33 @@ def BER(x_pred, x_gt):
 
 def FER(x_pred, x_gt):
     return torch.mean(torch.any(x_pred != x_gt, dim=1).float()).item()
+
+
+def decode_systematic(model_output, inv_perm, k):
+    """
+    Recover message bits from a non-systematic codeword.
+
+    Steps:
+      1. Apply inv_perm to reorder codeword columns into systematic form.
+         After reordering, the first k positions correspond to the identity
+         block of G_sys, i.e. they ARE the message bits.
+      2. Slice the first k bits.
+
+    Parameters
+    ----------
+    model_output : torch.Tensor, shape (n,)  — hard-decision codeword (0s and 1s)
+    inv_perm     : list[int], length n       — precomputed inverse column permutation
+    k            : int                       — number of message bits
+
+    Returns
+    -------
+    u_hat : torch.Tensor, shape (k,)
+    """
+    inv_perm_tensor = torch.tensor(inv_perm, dtype=torch.long)
+    c_perm = model_output[:, inv_perm_tensor]   # reorder into systematic column space
+    return c_perm[:, :k]                        # first k positions = message bits
+
+
 
 
 def img_to_bitstream(img:Image):
@@ -99,9 +143,11 @@ def decode_ldpc(x, code):
     return x[:, :code.k]
     
 
-def encoded_to_msg_bits(encoded_msg_vector, code):
+def encoded_to_msg_bits(encoded_msg_vector, code,  inv_perm, systematic=True):
 
-    if code.code_type == 'LDPC':
+    if code.code_type == 'LDPC' and not systematic:
+        return decode_systematic(encoded_msg_vector, inv_perm, code.k)
+    if code.code_type == 'LDPC' and systematic:
         return decode_ldpc(encoded_msg_vector, code)
     if code.code_type == 'POLAR':
         raise NotImplementedError
@@ -227,7 +273,7 @@ def decode_with_bp(y, code, max_iter=20):
 def parse_args(args=None):
     argparser = ArgumentParser('simulate')
     argparser.add_argument('--code-hint', dest='code_hint', type=str, required=True, help="String hint for code that the decoder will be trained on see the codes dir for available codes")
-    argparser.add_argument('--path', dest='path', default='results', required=False, help="Path where the results are saved [Default: results]")
+    argparser.add_argument('--path', dest='path', default='results', required=False, help="path of model")
     argparser.add_argument("--snr_lower", dest="snr_lower", type=float, required=True, help="decides lower noise level to corrupt the transmitted bits during simulation")
     argparser.add_argument("--snr_upper", dest="snr_upper", type=float, required=True, help="decides upper noise level to corrupt the transmitted bits during simulation")
     argparser.add_argument("--snr_step", dest="snr_step", type=float, required=True, help="step increment in snr for simulation")
@@ -240,6 +286,9 @@ def parse_args(args=None):
     choices=["model", "bp"],
     help="Choose decoding method: model or belief propagation"
 )
+    argparser.add_argument('--transform', dest='transform', type=str,
+                           required=True,
+                           help='Path to the .npz artifact from precompute_systematic_transform.py')
     return argparser.parse_args(args=args)
 
 
@@ -254,11 +303,14 @@ def main():
 
     config, model = load_path(args.path)
     code = code_from_hint(args.code_hint)
+    col_perm, inv_perm = load_col_perm(args.transform)
     test_results = {}
     test_results['model_type'] = config.path
     test_results['code_type'] = args.code_hint
     test_results['snr_lower'] = args.snr_lower
     test_results['snr_upper'] = args.snr_upper
+
+ 
     
     for i, each_img_path in enumerate(os.listdir(args.img_data_path)):
         print(f"Processing image {i}: {each_img_path}...\n\n")
@@ -286,17 +338,25 @@ def main():
              predicted_codewords = decode_with_bp(y, code, max_iter=30)
             else:
              raise ValueError("Unknown decoder")
-            ber = BER(predicted_codewords, x)
+          
+
+            recovered_message_bits = encoded_to_msg_bits(predicted_codewords, code, inv_perm)
+            recovered_bitstream = chunks_to_bitarray(recovered_message_bits)
+
+            recovered_image = bitstream_to_img(recovered_bitstream, original_length)
+
+          #  print(f"recovered bitstream shape: {recovered_bitstream.shape}\n\noriginal bitstream shape: {bitstream.shape}")
+
+            ber = BER(recovered_bitstream[:original_length], torch.tensor(bitstream))
             test_results[i][f'snr_{snr_str}']['BER'] = ber
             print(f"Bit error rate(BER) = {ber}")
 
-            recovered_message_bits = encoded_to_msg_bits(predicted_codewords, code)
-            recovered_bitstream = chunks_to_bitarray(recovered_message_bits)
-
-            recovered_image = bitstream_to_img(recovered_bitstream)
-
             if recovered_image is not None:
                 recovered_image.save(os.path.join(snr_folder_path, f"{each_img_path.split(".")[0]}_recovered.jpg"))
+
+      
+
+     
 
 
     overall_metrics = {}
